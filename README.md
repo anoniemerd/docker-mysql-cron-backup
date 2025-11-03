@@ -82,7 +82,7 @@ If you use Gotify, you should receive a notification when the first backup is wr
 
   
 
-## 🧱 docker-compose.yml
+## 🐳 docker-compose.yml
 
   
 
