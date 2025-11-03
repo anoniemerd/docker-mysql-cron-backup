@@ -93,159 +93,98 @@ If you use Gotify, you should receive a notification when the first backup is wr
 ```yaml
 
 services:
-
-mysql-cron-backup:
-
-image: fradelg/mysql-cron-backup:latest
-
-restart: unless-stopped
-
-environment:
-
-MYSQL_HOST: ${DB_HOST}
-
-MYSQL_PORT: ${DB_PORT}
-
-MYSQL_USER: ${DB_USER}
-
-MYSQL_PASS: ${DB_PASS}
-
-CRON_TIME: ${CRON_TIME}
-
-TZ: ${TZ}
-
-MAX_BACKUPS: ${MAX_BACKUPS}
-
-INIT_BACKUP: ${INIT_BACKUP}
-
-USE_PLAIN_SQL: ${USE_PLAIN_SQL}
-
-MYSQLDUMP_OPTS: ${MYSQLDUMP_OPTS}
-
-volumes:
-
-- ${VOLUME_PATH}:/backup
-
-gotify-notification:
-
-image: alpine:3.20
-
-restart: unless-stopped
-
-depends_on:
-
-- mysql-cron-backup
-
-environment:
-
-GOTIFY_URL: ${GOTIFY_URL}
-
-GOTIFY_TOKEN: ${GOTIFY_TOKEN}
-
-MIN_SIZE_BYTES: ${MIN_SIZE_BYTES:-100}
-
-CURL_INSECURE: ${CURL_INSECURE:-0}
-
-volumes:
-
-- ${VOLUME_PATH}:/backup:ro
-
-entrypoint: >
-
-/bin/sh -lc '
-
-set -eu;
-
-apk add --no-cache curl inotify-tools bc tzdata >/dev/null;
-
-export TZ=Europe/Amsterdam;
-
-  
-
-send_msg() {
-
-file="$$1"
-
-# Try to extract db name from file name: 20251103_1010.kuma.sql -> kuma
-
-dbname=$$(basename "$$file" | sed -E "s/.*[._]([A-Za-z0-9_-]+)\.sql.*/\1/")
-
-size_bytes=$$(wc -c < "$$file" || echo 0)
-
-size_mb=$$(echo "scale=2; $$size_bytes/1048576" | bc)
-
-# Time in local Timezone
-
-ts=$$(date +"%d-%m-%y - %H:%M (%Z)")
-
-  
-
-if [ "$${size_bytes:-0}" -gt "$${MIN_SIZE_BYTES:-100}" ]; then
-
-title="MySQL backup of $${dbname} = ✅ SUCCESS"
-
-prio=5
-
-else
-
-title="MySQL backup of $${dbname} = ❌ FAILED"
-
-prio=8
-
-fi
-
-  
-
-# 📄 for file, 💾 for size, 🕒 for time
-
-msg=$$(printf "📄 File: %s\n💾 Size: %s MB\n🕒 Time: %s" \
-
-"$$(basename "$$file")" "$$size_mb" "$$ts")
-
-  
-
-CURL_OPTS="-fsS"
-
-[ "$${CURL_INSECURE:-0}" = "1" ] && CURL_OPTS="$$CURL_OPTS -k"
-
-  
-
-curl $$CURL_OPTS -X POST "$${GOTIFY_URL}/message?token=$${GOTIFY_TOKEN}" \
-
--F "title=$$title" \
-
--F "message=$$msg" \
-
--F "priority=$$prio" || true
-
-}
-
-  
-
-# Send startup notification for latest backup if exists
-
-latest="$$(ls -1t /backup/*.sql /backup/*.sql.gz 2>/dev/null | head -n1 || true)"
-
-if [ -n "$${latest:-}" ]; then send_msg "$$latest"; fi
-
-  
-
-# Watch for new backup files
-
-inotifywait -m -e close_write,create --format "%w%f" /backup |
-
-while read -r f; do
-
-case "$$f" in
-
-*.sql|*.sql.gz) send_msg "$$f" ;;
-
-esac
-
-done
-
-'
-
+  mysql-cron-backup:
+    image: fradelg/mysql-cron-backup:latest
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: ${DB_HOST}
+      MYSQL_PORT: ${DB_PORT}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASS: ${DB_PASS}
+      CRON_TIME: "${CRON_TIME}"
+      TZ: ${TZ}
+      MAX_BACKUPS: ${MAX_BACKUPS}
+      INIT_BACKUP: ${INIT_BACKUP}
+      USE_PLAIN_SQL: ${USE_PLAIN_SQL}
+      MYSQLDUMP_OPTS: "${MYSQLDUMP_OPTS}"
+    volumes:
+      - ${VOLUME_PATH}:/backup
+
+  gotify-notification:
+    image: alpine:3.20
+    restart: unless-stopped
+    depends_on:
+      - mysql-cron-backup
+    environment:
+      GOTIFY_URL: ${GOTIFY_URL}
+      GOTIFY_TOKEN: ${GOTIFY_TOKEN}
+      MIN_SIZE_BYTES: ${MIN_SIZE_BYTES:-100}
+      CURL_INSECURE: ${CURL_INSECURE:-0}
+    volumes:
+      - ${VOLUME_PATH}:/backup:ro
+    entrypoint: >
+      /bin/sh -lc '
+        set -eu;
+        apk add --no-cache curl inotify-tools bc tzdata >/dev/null;
+        export TZ=Europe/Amsterdam;
+
+        send_msg() {
+          file="$$1"
+
+          # Detect manual backup
+          if echo "$$(basename "$$file")" | grep -q "^manual-"; then
+            dbname="manual"
+            manual="true"
+          else
+            # Extract DB name from filename, e.g. 20251103_1010.kuma.sql -> kuma
+            dbname=$$(basename "$$file" | sed -E "s/.*[._]([A-Za-z0-9_-]+)\.sql.*/\1/")
+            manual="false"
+          fi
+
+          # Ensure file is fully written
+          sleep 0.5
+          size_bytes=$$(wc -c < "$$file" || echo 0)
+          size_mb=$$(echo "scale=2; $$size_bytes/1048576" | bc)
+          ts=$$(date +"%d-%m-%y - %H:%M (%Z)")
+
+          # Build title
+          if [ "$${size_bytes:-0}" -gt "$${MIN_SIZE_BYTES:-100}" ]; then
+            status="✅ SUCCESSFUL"; prio=5
+          else
+            status="❌ FAILED"; prio=8
+          fi
+
+          if [ "$$manual" = "true" ]; then
+            title="Manual MySQL backup = $${status}"
+          else
+            title="MySQL backup of $${dbname} = $${status}"
+          fi
+
+          # Message body
+          msg=$$(printf "📄 File: %s\n💾 Size: %s MB\n🕒 Time: %s" \
+                        "$$(basename "$$file")" "$$size_mb" "$$ts")
+
+          CURL_OPTS="-fsS"
+          [ "$${CURL_INSECURE:-0}" = "1" ] && CURL_OPTS="$$CURL_OPTS -k"
+
+          curl $$CURL_OPTS -X POST "$${GOTIFY_URL}/message?token=$${GOTIFY_TOKEN}" \
+            -F "title=$$title" \
+            -F "message=$$msg" \
+            -F "priority=$$prio" || true
+        }
+
+        # Notify about latest backup on startup (optional)
+        latest="$$(ls -1t /backup/*.sql /backup/*.sql.gz 2>/dev/null | head -n1 || true)"
+        if [ -n "$${latest:-}" ]; then send_msg "$$latest"; fi
+
+        # Only close_write to avoid duplicates
+        inotifywait -m -e close_write --format "%w%f" /backup |
+        while read -r f; do
+          case "$$f" in
+            *.sql|*.sql.gz) send_msg "$$f" ;;
+          esac
+        done
+      '
 networks: {}
 
 ```
