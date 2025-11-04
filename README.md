@@ -101,12 +101,12 @@ services:
       MYSQL_PORT: ${DB_PORT}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASS: ${DB_PASS}
-      CRON_TIME: "${CRON_TIME}"
+      CRON_TIME: ${CRON_TIME}
       TZ: ${TZ}
       MAX_BACKUPS: ${MAX_BACKUPS}
       INIT_BACKUP: ${INIT_BACKUP}
       USE_PLAIN_SQL: ${USE_PLAIN_SQL}
-      MYSQLDUMP_OPTS: "${MYSQLDUMP_OPTS}"
+      MYSQLDUMP_OPTS: ${MYSQLDUMP_OPTS}
     volumes:
       - ${VOLUME_PATH}:/backup
 
@@ -120,6 +120,7 @@ services:
       GOTIFY_TOKEN: ${GOTIFY_TOKEN}
       MIN_SIZE_BYTES: ${MIN_SIZE_BYTES:-100}
       CURL_INSECURE: ${CURL_INSECURE:-0}
+      INIT_BACKUP: ${INIT_BACKUP}
     volumes:
       - ${VOLUME_PATH}:/backup:ro
     entrypoint: >
@@ -173,9 +174,11 @@ services:
             -F "priority=$$prio" || true
         }
 
-        # Notify about latest backup on startup (optional)
-        latest="$$(ls -1t /backup/*.sql /backup/*.sql.gz 2>/dev/null | head -n1 || true)"
-        if [ -n "$${latest:-}" ]; then send_msg "$$latest"; fi
+        # Notify about latest backup only if INIT_BACKUP=1
+        if [ "$${INIT_BACKUP:-0}" = "1" ]; then
+          latest="$$(ls -1t /backup/*.sql /backup/*.sql.gz 2>/dev/null | head -n1 || true)"
+          if [ -n "$${latest:-}" ]; then send_msg "$$latest"; fi
+        fi
 
         # Only close_write to avoid duplicates
         inotifywait -m -e close_write --format "%w%f" /backup |
@@ -186,7 +189,6 @@ services:
         done
       '
 networks: {}
-
 ```
 
   
