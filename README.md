@@ -612,11 +612,6 @@ Ensure the host directory exists and is writable by Docker.
   
 
 ---
-
   
 
-## 📜 License
-
-  
-
-This setup uses the upstream image **fradelg/mysql-cron-backup** under its respective license. Your additional scripts/config here can be licensed as you prefer.
+This setup uses the upstream image **fradelg/mysql-cron-backup** under its respective license.
